@@ -12,10 +12,17 @@ app.use(express.static(path.join(__dirname, "..")));
 
 let minecraftData = null;
 const clients = new Map(); // Map<WebSocket, { gamertag: string }>
+const pttStates = new Map(); // NUEVO: Map<gamertag, { isTalking: boolean, isMuted: boolean }>
 
 app.post("/minecraft-data", (req, res) => {
   minecraftData = req.body;
   console.log("📦 Datos de Minecraft recibidos");
+
+  // NUEVO: Incluir estados de PTT en la respuesta
+  const pttStatesArray = Array.from(pttStates.entries()).map(([gamertag, state]) => ({
+    gamertag,
+    ...state
+  }));
 
   wss.clients.forEach(client => {
     if (client.readyState === 1) {
@@ -26,7 +33,11 @@ app.post("/minecraft-data", (req, res) => {
     }
   });
 
-  res.json({ success: true });
+  // Responder con los estados de PTT para que Minecraft los procese
+  res.json({ 
+    success: true,
+    pttStates: pttStatesArray
+  });
 });
 
 // Función helper para encontrar si un gamertag ya existe
@@ -77,6 +88,10 @@ wss.on("connection", (ws) => {
         }
 
         clients.set(ws, { gamertag: data.gamertag });
+        
+        // NUEVO: Inicializar estado de PTT para este jugador
+        pttStates.set(data.gamertag, { isTalking: true, isMuted: false });
+        
         console.log(`👤 ${data.gamertag} se unió (${clients.size} usuarios en total)`);
 
         // Notificar a todos los demás que alguien se unió
@@ -114,8 +129,33 @@ wss.on("connection", (ws) => {
             gamertag: clientData.gamertag
           });
 
+          // NUEVO: Limpiar estado de PTT
+          pttStates.delete(clientData.gamertag);
+
           clients.delete(ws);
         }
+        return;
+      }
+
+      // NUEVO: Manejar estado de Push-to-Talk
+      if (data.type === 'ptt-status') {
+        const gamertag = data.gamertag;
+        const isTalking = data.isTalking;
+        const isMuted = data.isMuted;
+
+        // Guardar estado
+        pttStates.set(gamertag, { isTalking, isMuted });
+
+        console.log(`🎙️ PTT: ${gamertag} → ${isTalking ? 'TALKING' : 'MUTED'}`);
+
+        // Retransmitir a TODOS (incluyendo al emisor para que Minecraft lo reciba)
+        broadcastToAll({
+          type: 'ptt-update',
+          gamertag: gamertag,
+          isTalking: isTalking,
+          isMuted: isMuted
+        });
+
         return;
       }
 
@@ -195,6 +235,9 @@ wss.on("connection", (ws) => {
         gamertag: clientData.gamertag
       });
 
+      // NUEVO: Limpiar estado de PTT
+      pttStates.delete(clientData.gamertag);
+
       clients.delete(ws);
       
       // Opcional: Enviar lista actualizada después de que alguien se va
@@ -227,9 +270,19 @@ app.get("/health", (req, res) => {
     status: 'ok',
     connected_users: clients.size,
     minecraft_data: !!minecraftData,
+    ptt_active_users: pttStates.size, // NUEVO
     uptime: process.uptime()
   };
   res.json(status);
+});
+
+// NUEVO: Endpoint para obtener estados de PTT (útil para debugging)
+app.get("/ptt-states", (req, res) => {
+  const states = Array.from(pttStates.entries()).map(([gamertag, state]) => ({
+    gamertag,
+    ...state
+  }));
+  res.json({ pttStates: states });
 });
 
 // Manejo de cierre limpio
@@ -252,9 +305,10 @@ process.on('SIGINT', () => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 EnviroVoice Server v2.0`);
+  console.log(`🚀 EnviroVoice Server v2.1`);
   console.log(`🌐 Servidor escuchando en puerto ${PORT}`);
   console.log(`📡 WebSocket: ws://localhost:${PORT}`);
   console.log(`🎮 Minecraft endpoint: POST http://localhost:${PORT}/minecraft-data`);
   console.log(`💚 Health check: GET http://localhost:${PORT}/health`);
+  console.log(`🎙️ PTT states: GET http://localhost:${PORT}/ptt-states`);
 });
