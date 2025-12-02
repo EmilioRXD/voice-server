@@ -11,14 +11,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "..")));
 
 let minecraftData = null;
-const clients = new Map(); // Map<WebSocket, { gamertag: string }>
-const pttStates = new Map(); // Map<gamertag, { isTalking: boolean, isMuted: boolean }>
+const clients = new Map();
+const pttStates = new Map();
 
 app.post("/minecraft-data", (req, res) => {
   minecraftData = req.body;
   console.log("📦 Datos de Minecraft recibidos");
 
-  // NUEVO: Preparar estados de mute para enviar a los clientes
   const muteStates = minecraftData.players?.map(player => ({
     gamertag: player.name,
     isMuted: player.data.isMuted,
@@ -26,32 +25,28 @@ app.post("/minecraft-data", (req, res) => {
     micVolume: player.data.micVolume
   })) || [];
 
-  // Incluir estados de PTT en la respuesta
   const pttStatesArray = Array.from(pttStates.entries()).map(([gamertag, state]) => ({
     gamertag,
     ...state
   }));
 
-  // CRÍTICO: Enviar datos de Minecraft + estados de mute + estados PTT a todos los clientes
   wss.clients.forEach(client => {
     if (client.readyState === 1) {
       client.send(JSON.stringify({
         type: 'minecraft-update',
         data: minecraftData,
-        muteStates: muteStates,  // NUEVO: Estados de mute desde Minecraft
+        muteStates: muteStates,
         pttStates: pttStatesArray
       }));
     }
   });
 
-  // Responder con los estados de PTT para que Minecraft los procese
   res.json({ 
     success: true,
     pttStates: pttStatesArray
   });
 });
 
-// Función helper para encontrar si un gamertag ya existe
 function isGamertagTaken(gamertag) {
   for (const [_, clientData] of clients.entries()) {
     if (clientData.gamertag === gamertag) {
@@ -61,7 +56,6 @@ function isGamertagTaken(gamertag) {
   return false;
 }
 
-// Función para broadcast a todos excepto al emisor
 function broadcast(senderWs, message) {
   wss.clients.forEach(client => {
     if (client !== senderWs && client.readyState === 1) {
@@ -70,7 +64,6 @@ function broadcast(senderWs, message) {
   });
 }
 
-// Función para enviar a todos incluyendo al emisor
 function broadcastToAll(message) {
   wss.clients.forEach(client => {
     if (client.readyState === 1) {
@@ -87,7 +80,6 @@ wss.on("connection", (ws) => {
       const data = JSON.parse(msg.toString());
 
       if (data.type === 'join') {
-        // Verificar si el gamertag ya está en uso
         if (isGamertagTaken(data.gamertag)) {
           console.log(`❌ Gamertag duplicado rechazado: ${data.gamertag}`);
           ws.send(JSON.stringify({
@@ -100,27 +92,22 @@ wss.on("connection", (ws) => {
 
         clients.set(ws, { gamertag: data.gamertag });
         
-        // Inicializar estado de PTT para este jugador
         pttStates.set(data.gamertag, { isTalking: true, isMuted: false });
         
         console.log(`👤 ${data.gamertag} se unió (${clients.size} usuarios en total)`);
 
-        // Notificar a todos los demás que alguien se unió
         broadcast(ws, {
           type: 'join',
           gamertag: data.gamertag
         });
 
-        // Obtener lista actualizada de participantes
         const participantsList = Array.from(clients.values()).map(c => c.gamertag);
         
-        // Enviar lista completa al nuevo usuario
         ws.send(JSON.stringify({
           type: 'participants-list',
           list: participantsList
         }));
 
-        // También enviar la lista actualizada a TODOS los demás
         broadcast(ws, {
           type: 'participants-list',
           list: participantsList
@@ -145,18 +132,15 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      // Manejar estado de Push-to-Talk
       if (data.type === 'ptt-status') {
         const gamertag = data.gamertag;
         const isTalking = data.isTalking;
         const isMuted = data.isMuted;
 
-        // Guardar estado
         pttStates.set(gamertag, { isTalking, isMuted });
 
         console.log(`🎙️ PTT: ${gamertag} → ${isTalking ? 'TALKING' : 'MUTED'}`);
 
-        // Retransmitir a TODOS
         broadcastToAll({
           type: 'ptt-update',
           gamertag: gamertag,
@@ -176,7 +160,6 @@ wss.on("connection", (ws) => {
         const targetGamertag = data.to;
         let targetWs = null;
         
-        // Buscar el WebSocket del destinatario
         for (const [clientWs, clientData] of clients.entries()) {
           if (clientData.gamertag === targetGamertag) {
             targetWs = clientWs;
@@ -200,7 +183,6 @@ wss.on("connection", (ws) => {
       }
 
       if (data.type === 'heartbeat') {
-        // Solo para mantener la conexión viva
         return;
       }
 
@@ -255,7 +237,6 @@ wss.on("connection", (ws) => {
     console.error(`❌ Error en WebSocket para ${gamertag}:`, error.message);
   });
 
-  // Si hay datos de Minecraft, enviarlos al nuevo cliente
   if (minecraftData) {
     ws.send(JSON.stringify({
       type: 'minecraft-update',
@@ -264,7 +245,6 @@ wss.on("connection", (ws) => {
   }
 });
 
-// Endpoint de salud
 app.get("/health", (req, res) => {
   const status = {
     status: 'ok',
@@ -276,7 +256,6 @@ app.get("/health", (req, res) => {
   res.json(status);
 });
 
-// Endpoint para obtener estados de PTT
 app.get("/ptt-states", (req, res) => {
   const states = Array.from(pttStates.entries()).map(([gamertag, state]) => ({
     gamertag,
@@ -285,7 +264,6 @@ app.get("/ptt-states", (req, res) => {
   res.json({ pttStates: states });
 });
 
-// Manejo de cierre limpio
 process.on('SIGINT', () => {
   console.log('\n🛑 Apagando servidor...');
   
@@ -310,3 +288,4 @@ server.listen(PORT, () => {
   console.log(`💚 Health check: GET http://localhost:${PORT}/health`);
   console.log(`🎙️ PTT states: GET http://localhost:${PORT}/ptt-states`);
 });
+
