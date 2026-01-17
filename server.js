@@ -12,11 +12,11 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
+
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
-  
+
   next();
 });
 
@@ -63,7 +63,7 @@ app.post("/minecraft-data", (req, res) => {
     }
   });
 
-  res.json({ 
+  res.json({
     success: true,
     pttStates: pttStatesArray,
     voiceStates: voiceStatesArray // NUEVO
@@ -114,10 +114,10 @@ wss.on("connection", (ws) => {
         }
 
         clients.set(ws, { gamertag: data.gamertag });
-        
+
         pttStates.set(data.gamertag, { isTalking: true, isMuted: false });
         voiceDetectionStates.set(data.gamertag, { isTalking: false, volume: 0 }); // NUEVO
-        
+
         console.log(`👤 ${data.gamertag} se unió (${clients.size} usuarios en total)`);
 
         broadcast(ws, {
@@ -126,7 +126,7 @@ wss.on("connection", (ws) => {
         });
 
         const participantsList = Array.from(clients.values()).map(c => c.gamertag);
-        
+
         ws.send(JSON.stringify({
           type: 'participants-list',
           list: participantsList
@@ -198,7 +198,7 @@ wss.on("connection", (ws) => {
 
         const targetGamertag = data.to;
         let targetWs = null;
-        
+
         for (const [clientWs, clientData] of clients.entries()) {
           if (clientData.gamertag === targetGamertag) {
             targetWs = clientWs;
@@ -208,7 +208,7 @@ wss.on("connection", (ws) => {
 
         if (targetWs && targetWs.readyState === 1) {
           targetWs.send(JSON.stringify(data));
-          
+
           if (data.type === 'ice-candidate') {
             console.log(`🧊 ICE ${data.from} → ${data.to}`);
           } else {
@@ -227,17 +227,17 @@ wss.on("connection", (ws) => {
 
       if (data.type === 'request-participants') {
         const participantsList = Array.from(clients.values()).map(c => c.gamertag);
-        
+
         ws.send(JSON.stringify({
           type: 'participants-list',
           list: participantsList
         }));
-        
+
         broadcastToAll({
           type: 'participants-list',
           list: participantsList
         });
-        
+
         console.log(`📋 Lista de participantes enviada (${participantsList.length} usuarios)`);
         return;
       }
@@ -262,7 +262,7 @@ wss.on("connection", (ws) => {
       pttStates.delete(clientData.gamertag);
       voiceDetectionStates.delete(clientData.gamertag); // NUEVO
       clients.delete(ws);
-      
+
       const updatedList = Array.from(clients.values()).map(c => c.gamertag);
       broadcastToAll({
         type: 'participants-list',
@@ -342,20 +342,20 @@ app.get("/voice-states", (req, res) => {
 
 process.on('SIGINT', () => {
   console.log('\n🛑 Apagando servidor...');
-  
+
   broadcastToAll({ type: 'server-shutdown' });
-  
+
   wss.clients.forEach(client => {
     client.close();
   });
-  
+
   server.close(() => {
     console.log('✅ Servidor cerrado');
     process.exit(0);
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`🚀 EnviroVoice Server v2.2`);
   console.log(`🌐 Servidor escuchando en puerto ${PORT}`);

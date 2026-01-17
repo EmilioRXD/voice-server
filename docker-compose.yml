@@ -1,0 +1,7 @@
+services:
+  envirovoice-server:
+    build: .
+    container_name: envirovoice-server
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    restart: always
