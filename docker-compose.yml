@@ -3,7 +3,7 @@ services:
     build: .
     container_name: envirovoice-server
     environment:
-      - PORT=${APP_PORT}
+      - PORT=${APP_PORT:-4000}
     expose:
-      - "${APP_PORT}"
+      - "${APP_PORT:-4000}"
     restart: always
