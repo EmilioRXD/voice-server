@@ -901,6 +901,7 @@ class WebRTCManager {
     // ICE candidates
     pc.onicecandidate = (e) => {
       if (e.candidate && this.ws && this.ws.readyState === 1) {
+        console.log(`❄️ Sending ICE candidate to ${remoteGamertag}`);
         this.ws.send(
           JSON.stringify({
             type: "ice-candidate",
@@ -911,6 +912,9 @@ class WebRTCManager {
         );
       }
     };
+
+    // Cola para ICE candidates antes de que PC esté listo
+    pc._iceQueue = [];
 
     // Bandera para controlar renegociación
     pc._isInitialConnection = true;
@@ -970,8 +974,12 @@ class WebRTCManager {
       document.body.appendChild(audioElement);
 
       // Forzar reproducción
-      audioElement.play().catch((err) => {
-        console.warn(`⚠️ Autoplay blocked for ${remoteGamertag}`);
+      audioElement.play().then(() => {
+        console.log(`🔊 Audio playing for ${remoteGamertag}`);
+      }).catch((err) => {
+        console.error(`❌ Autoplay blocked for ${remoteGamertag}:`, err);
+        // Intentar de nuevo con interacción
+        document.addEventListener('click', () => audioElement.play(), { once: true });
       });
 
       // Asignar al participante INMEDIATAMENTE
@@ -1015,6 +1023,14 @@ class WebRTCManager {
         console.log(`✅ ${remoteGamertag} - Connection fully established`);
         pc._isInitialConnection = false;
         pc._reconnectAttempts = 0;
+
+        // DEBUG: Verificar si el track está silenciado
+        const receivers = pc.getReceivers();
+        receivers.forEach(r => {
+          if (r.track) {
+            console.log(`🎵 Remote track for ${remoteGamertag}: state=${r.track.readyState}, enabled=${r.track.enabled}`);
+          }
+        });
 
         setTimeout(() => {
           if (this.minecraft && this.minecraft.isInGame()) {
@@ -2329,6 +2345,13 @@ class VoiceChatApp {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
+          // Procesar candidatos en cola
+          if (pc._iceQueue && pc._iceQueue.length > 0) {
+            console.log(`❄️ Processing ${pc._iceQueue.length} queued ICE candidates for ${data.from}`);
+            pc._iceQueue.forEach(cand => pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.error("Error adding queued ICE:", e)));
+            pc._iceQueue = [];
+          }
+
           this.ws.send(
             JSON.stringify({
               type: "answer",
@@ -2347,6 +2370,13 @@ class VoiceChatApp {
         if (pc && pc.signalingState === "have-local-offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           console.log(`✓ Answer applied for ${data.from}`);
+
+          // Procesar candidatos en cola
+          if (pc._iceQueue && pc._iceQueue.length > 0) {
+            console.log(`❄️ Processing ${pc._iceQueue.length} queued ICE candidates for ${data.from}`);
+            pc._iceQueue.forEach(cand => pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.error("Error adding queued ICE:", e)));
+            pc._iceQueue = [];
+          }
         }
       } else if (
         data.type === "ice-candidate" &&
@@ -2354,7 +2384,13 @@ class VoiceChatApp {
       ) {
         const pc = this.webrtc.getPeerConnection(data.from);
         if (pc && data.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          if (pc.remoteDescription) {
+            pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.error("❌ Error adding ICE candidate:", e));
+          } else {
+            console.log(`⏳ Enqueuing ICE candidate for ${data.from} (remote description not ready)`);
+            if (!pc._iceQueue) pc._iceQueue = [];
+            pc._iceQueue.push(data.candidate);
+          }
         }
       } else if (data.type === "participants-list") {
         console.log(`📋 Received participants list: ${data.list.join(", ")}`);
