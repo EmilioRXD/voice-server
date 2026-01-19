@@ -853,12 +853,13 @@ class ParticipantsManager {
 // Maneja las conexiones WebRTC peer-to-peer
 // =====================================================
 class WebRTCManager {
-  constructor(participantsManager, audioEffects, minecraft, onTrackReceived) {
+  constructor(participantsManager, audioEffects, minecraft, onTrackReceived, onDiagnostic) {
     this.peerConnections = new Map();
     this.participantsManager = participantsManager;
     this.audioEffects = audioEffects;
     this.minecraft = minecraft;
     this.onTrackReceived = onTrackReceived;
+    this.onDiagnostic = onDiagnostic;
     this.ws = null;
     this.currentGamertag = "";
   }
@@ -991,7 +992,7 @@ class WebRTCManager {
     };
 
     pc.onconnectionstatechange = () => {
-      this.addDiagnostic(`🔌 ${remoteGamertag}: ${pc.connectionState}`);
+      if (this.onDiagnostic) this.onDiagnostic(`🔌 ${remoteGamertag}: ${pc.connectionState}`);
       console.log(
         `🔌 ${remoteGamertag} - Connection state: ${pc.connectionState}`
       );
@@ -1562,6 +1563,7 @@ class UIManager {
   }
 
   updateGamertagStatus(gamertag) {
+    if (!this.elements.gamertagStatus) return; // Protección para modo simple
     this.elements.gamertagStatus.textContent = gamertag
       ? `✓ Gamertag: ${gamertag}`
       : "⚠️ Enter your gamertag to continue";
@@ -1569,7 +1571,11 @@ class UIManager {
   }
 
   updateRoomInfo(message) {
-    this.elements.roomInfo.textContent = message;
+    if (this.elements.roomInfo) {
+      this.elements.roomInfo.textContent = message;
+    } else {
+      console.log(`ℹ️ Room Info: ${message}`);
+    }
   }
 
   showCallControls(show) {
@@ -1789,7 +1795,8 @@ class VoiceChatApp {
       this.participantsManager,
       this.audioEffects,
       null,
-      (participant) => this.onTrackReceived(participant)
+      (participant) => this.onTrackReceived(participant),
+      (msg) => this.addDiagnostic(msg)
     );
     this.pushToTalk = new PushToTalkManager(this.micManager, this.webrtc); // NUEVO: pasar webrtc
     this.minecraft = new MinecraftIntegration(
@@ -1931,6 +1938,8 @@ class VoiceChatApp {
     let keyListener = null;
 
     // Toggle de PTT
+    if (!this.ui.elements.pttToggle) return; // Protección modo simple
+
     this.ui.elements.pttToggle.addEventListener("change", (e) => {
       const enabled = e.target.checked;
       this.pushToTalk.setEnabled(enabled);
