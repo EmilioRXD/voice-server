@@ -355,7 +355,7 @@ process.on('SIGINT', () => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 server.listen(PORT, () => {
   console.log(`🚀 EnviroVoice Server v2.2`);
   console.log(`🌐 Servidor escuchando en puerto ${PORT}`);
