@@ -27,13 +27,18 @@ class VoiceDetector {
     // para cumplir con las políticas de auto-play del navegador.
   }
 
-  async initialize(stream) {
+  async initialize(stream, externalContext = null) {
     if (this.audioContext) return;
 
     this.stream = stream;
     try {
-      this.audioContext = new (window.AudioContext ||
-        window.webkitAudioContext)();
+      // UNIFICADO: Usar el contexto externo (Tone.js) si existe
+      this.audioContext = externalContext || new (window.AudioContext || window.webkitAudioContext)();
+
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 2048;
       this.analyser.smoothingTimeConstant = 0.8;
@@ -122,10 +127,6 @@ class VoiceDetector {
 
     if (this.microphone) {
       this.microphone.disconnect();
-    }
-
-    if (this.audioContext && this.audioContext.state !== "closed") {
-      this.audioContext.close();
     }
 
     console.log("✓ Voice detector disposed");
@@ -876,7 +877,7 @@ class WebRTCManager {
       return this.peerConnections.get(remoteGamertag);
     }
 
-    // ✅ AHORA (STUN + TURN):
+    // ✅ CONFIGURACIÓN AGRESIVA (STUN + TURN):
     const pc = new RTCPeerConnection({
       iceServers: [
         // STUN servers (para descubrir IP pública)
@@ -884,7 +885,7 @@ class WebRTCManager {
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
-        { urls: "stun:stun4.l.google.com:19302" },
+        { urls: "stun:stun.services.mozilla.com" },
         // TURN servers GRATUITOS (para VPN/NAT estricto)
         {
           urls: "turn:openrelay.metered.ca:80",
@@ -903,7 +904,9 @@ class WebRTCManager {
         },
       ],
       iceTransportPolicy: "all",
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require"
     });
 
     // ICE candidates
@@ -963,6 +966,15 @@ class WebRTCManager {
       }
 
       console.log(`🔊 Audio channel established and connected to Tone.Destination for ${remoteGamertag}`);
+      this.addDiagnostic(`🔊 Audio track received from ${remoteGamertag}`);
+
+      // REDUNDANCIA: Añadir un elemento <audio> invisible para mantener el stream "vivo" en Chrome
+      const keepAliveAudio = document.createElement("audio");
+      keepAliveAudio.srcObject = remoteStream;
+      keepAliveAudio.muted = true; // No queremos duplicar el sonido, solo mantener el track activo
+      keepAliveAudio.play().catch(() => { });
+      keepAliveAudio.style.display = "none";
+      document.body.appendChild(keepAliveAudio);
 
       // Asignar al participante
       const participant = this.participantsManager.get(remoteGamertag);
@@ -979,6 +991,7 @@ class WebRTCManager {
     };
 
     pc.onconnectionstatechange = () => {
+      this.addDiagnostic(`🔌 ${remoteGamertag}: ${pc.connectionState}`);
       console.log(
         `🔌 ${remoteGamertag} - Connection state: ${pc.connectionState}`
       );
@@ -1505,6 +1518,8 @@ class UIManager {
       participantsList: document.getElementById("participantsList"),
       setupSection: document.getElementById("setupSection"),
       gameStatus: document.getElementById("gameStatus"),
+      testAudioBtn: document.getElementById("testAudioBtn"),
+      diagnosticLog: document.getElementById("diagnosticLog"),
       minecraftConnectContainer: document.createElement("div"),
       // NUEVO: Elementos de Push-to-Talk
       pttContainer: document.getElementById("pttContainer"),
@@ -1883,6 +1898,24 @@ class VoiceChatApp {
     });
 
     this.ui.elements.exitBtn.addEventListener("click", () => this.exitCall());
+
+    if (this.ui.elements.testAudioBtn) {
+      this.ui.elements.testAudioBtn.addEventListener("click", () => {
+        this.testAudioOutput();
+        this.addDiagnostic("🔊 Audio test triggered");
+      });
+    }
+  }
+
+  addDiagnostic(msg) {
+    console.log(`[DIAG] ${msg}`);
+    if (this.ui.elements.diagnosticLog) {
+      this.ui.elements.diagnosticLog.style.display = "block";
+      const line = document.createElement("div");
+      line.textContent = `> ${new Date().toLocaleTimeString()}: ${msg}`;
+      this.ui.elements.diagnosticLog.appendChild(line);
+      this.ui.elements.diagnosticLog.scrollTop = this.ui.elements.diagnosticLog.scrollHeight;
+    }
   }
 
   // NUEVO: Configurar Push-to-Talk
@@ -2076,7 +2109,7 @@ class VoiceChatApp {
           }
         });
 
-        await this.voiceDetector.initialize(micStream);
+        await this.voiceDetector.initialize(micStream, Tone.context.rawContext || Tone.context._context);
         this.voiceDetector.setSensitivity("high");
       }
 
@@ -2331,6 +2364,7 @@ class VoiceChatApp {
 
         this.updateUI();
       } else if (data.type === "offer" && data.to === this.currentGamertag) {
+        this.addDiagnostic(`📨 Received offer from ${data.from}`);
         console.log(`📨 Received offer from ${data.from}`);
         this.participantsManager.add(data.from, false);
 
@@ -2367,6 +2401,7 @@ class VoiceChatApp {
         const pc = this.webrtc.getPeerConnection(data.from);
 
         if (pc && pc.signalingState === "have-local-offer") {
+          this.addDiagnostic(`✓ Applying answer from ${data.from}`);
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           console.log(`✓ Answer applied for ${data.from}`);
 
