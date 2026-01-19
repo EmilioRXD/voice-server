@@ -23,6 +23,10 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+app.get("/simple", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "simple.html"));
+});
+
 let minecraftData = null;
 const clients = new Map();
 const pttStates = new Map();

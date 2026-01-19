@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="shortcut icon" href="img/icon.png" type="image/x-icon">
+    <link rel="stylesheet" href="style.css" />
+    <title>EnviroVoice - SIMPLE MODE</title>
+    <style>
+        .simple-banner {
+            background: #ef4444;
+            color: white;
+            text-align: center;
+            padding: 5px;
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+
+<body class="simple-mode">
+    <div class="simple-banner">🛠️ MODO DE PRUEBAS SIMPLE (Sin Minecraft)</div>
+    <div class="container">
+        <div class="header">
+            <img src="img/title-light.png" alt="EnviroVoice" class="title-img title-light" />
+            <img src="img/title-dark.png" alt="EnviroVoice" class="title-img title-dark" />
+        </div>
+
+        <!-- Setup inicial -->
+        <div id="setupSection">
+            <div class="section">
+                <label for="gamertagInput">Enter any Nickname:</label>
+                <input type="text" id="gamertagInput" class="input-field" placeholder="Ex: TestUser1" />
+            </div>
+
+            <div class="section">
+                <button id="connectToRoomBtn" class="primary-btn">Join Simple Test</button>
+                <p id="roomInfo" class="status-text"></p>
+            </div>
+        </div>
+
+        <!-- Controles de llamada -->
+        <div id="callControls" class="call-controls" style="display: none">
+            <!-- Selector de Micrófono -->
+            <div class="mic-selector-container">
+                <label for="micSelector">🎤 Select Microphone:</label>
+                <select id="micSelector" class="mic-selector">
+                    <option value="">Loading microphones...</option>
+                </select>
+            </div>
+
+            <div class="controls-row">
+                <button id="exitBtn" class="control-btn exit">📞 Disconnect</button>
+                <button id="testAudioBtn" class="control-btn" style="background: #6366f1;">🔊 Test Sound</button>
+            </div>
+
+            <div id="diagnosticLog"
+                style="display:block; margin-top: 10px; font-size: 0.75rem; background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; max-height: 200px; overflow-y: auto; text-align: left;">
+                Diagnostic Log Started (Simple Mode)...
+            </div>
+
+            <div class="participants-section">
+                <h3>👥 Connected Users (Force 100% Volume)</h3>
+                <div id="participantsList" class="participants-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Botón de modo -->
+    <button id="darkModeToggle"></button>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script>
+        // Forzar modo simple antes de cargar el script
+        window.ENVIROVOICE_SIMPLE_MODE = true;
+    </script>
+    <script src="script.js"></script>
+    <script src="colorMode.js"></script>
+</body>
+
+</html>

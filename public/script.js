@@ -1302,6 +1302,7 @@ class MinecraftIntegration {
   }
 
   updateData(data) {
+    if (window.ENVIROVOICE_SIMPLE_MODE) return;
     this.minecraftData = data;
     this.processUpdate();
   }
@@ -1777,6 +1778,7 @@ class UIManager {
 // =====================================================
 class VoiceChatApp {
   constructor() {
+    this.isSimpleMode = window.ENVIROVOICE_SIMPLE_MODE || false;
     this.ui = new UIManager();
     this.audioEffects = new AudioEffectsManager();
     this.micManager = new MicrophoneManager(this.audioEffects);
@@ -2265,6 +2267,7 @@ class VoiceChatApp {
     if (data.type === "heartbeat") return;
 
     if (data.type === "minecraft-update") {
+      if (this.isSimpleMode) return; // Ignorar en modo simple
       this.minecraft.updateData(data.data);
 
       // NUEVO: Procesar estados de mute desde Minecraft
@@ -2446,10 +2449,15 @@ class VoiceChatApp {
   }
 
   onTrackReceived(participant) {
-    console.log(
-      `📍 Audio track received for ${participant.gamertag}, muting until position is received`
-    );
-    participant.updateVolume(0);
+    if (this.isSimpleMode) {
+      this.addDiagnostic(`📍 Audio connected for ${participant.gamertag} (SIMPLE MODE: 100% Volume)`);
+      participant.updateVolume(1);
+    } else {
+      console.log(
+        `📍 Audio track received for ${participant.gamertag}, muting until position is received`
+      );
+      participant.updateVolume(0);
+    }
     this.updateUI();
   }
 
