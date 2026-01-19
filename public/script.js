@@ -429,6 +429,8 @@ class PushToTalkManager {
     console.log(
       `🔇 Muted ${mutedCount} audio sender(s) across ${this.webrtcManager.peerConnections.size} peer(s)`
     );
+    // NUEVO: Asegurar que el estado local también refleje el mute
+    if (this.micManager) this.micManager.setEnabled(false);
   }
 
   // NUEVO: Desmutear todos los senders de WebRTC
@@ -453,6 +455,8 @@ class PushToTalkManager {
     console.log(
       `🔊 Unmuted ${unmutedCount} audio sender(s) across ${this.webrtcManager.peerConnections.size} peer(s)`
     );
+    // NUEVO: Asegurar que el estado local también refleje el unmute
+    if (this.micManager) this.micManager.setEnabled(true);
   }
 
   setKey(key, display) {
@@ -878,7 +882,9 @@ class WebRTCManager {
         // STUN servers (para descubrir IP pública)
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" },
+        { urls: "stun:stun4.l.google.com:19302" },
         // TURN servers GRATUITOS (para VPN/NAT estricto)
         {
           urls: "turn:openrelay.metered.ca:80",
@@ -896,6 +902,8 @@ class WebRTCManager {
           credential: "openrelayproject",
         },
       ],
+      iceTransportPolicy: "all",
+      iceCandidatePoolSize: 10
     });
 
     // ICE candidates
@@ -931,74 +939,41 @@ class WebRTCManager {
       }
 
       console.log(`🔄 Renegotiation needed with ${remoteGamertag}`);
-      try {
-        if (pc.signalingState !== "stable") {
-          console.log(
-            `⚠️ Signaling state is ${pc.signalingState}, skipping renegotiation`
-          );
-          return;
-        }
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        if (this.ws && this.ws.readyState === 1) {
-          this.ws.send(
-            JSON.stringify({
-              type: "offer",
-              offer: offer,
-              from: this.currentGamertag,
-              to: remoteGamertag,
-            })
-          );
-          console.log(`✓ Renegotiation offer sent to ${remoteGamertag}`);
-        }
-      } catch (e) {
-        console.error(`❌ Renegotiation failed with ${remoteGamertag}:`, e);
-      }
+      this.renegotiate(remoteGamertag);
     };
 
     // Audio entrante
     pc.ontrack = (event) => {
-      console.log(`🎵 ${remoteGamertag} connected`);
-
+      console.log(`🎵 Receiving track from ${remoteGamertag}`);
       const remoteStream = event.streams[0];
+      const audioContext = Tone.context.rawContext || Tone.context._context;
 
-      // Crear elemento de audio
-      const audioElement = document.createElement("audio");
-      audioElement.srcObject = remoteStream;
-      audioElement.autoplay = true;
-      audioElement.volume = 0; // Empezar silenciado
-      audioElement.id = `audio-${remoteGamertag}`;
-      audioElement.style.display = "none";
-      document.body.appendChild(audioElement);
+      // Crear nodos de audio integrados
+      const source = audioContext.createMediaStreamSource(remoteStream);
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 1.0; // Volumen al máximo para confirmar audibilidad inicial
 
-      // Forzar reproducción
-      audioElement.play().then(() => {
-        console.log(`🔊 Audio playing for ${remoteGamertag}`);
-      }).catch((err) => {
-        console.error(`❌ Autoplay blocked for ${remoteGamertag}:`, err);
-        // Intentar de nuevo con interacción
-        document.addEventListener('click', () => audioElement.play(), { once: true });
-      });
+      // Conectar a la salida MAESTRA de Tone.js
+      source.connect(gainNode);
+      // Tone.Destination es el nodo de salida final de Tone.js
+      if (Tone.Destination) {
+        gainNode.connect(Tone.Destination);
+      } else {
+        gainNode.connect(audioContext.destination);
+      }
 
-      // Asignar al participante INMEDIATAMENTE
+      console.log(`🔊 Audio channel established and connected to Tone.Destination for ${remoteGamertag}`);
+
+      // Asignar al participante
       const participant = this.participantsManager.get(remoteGamertag);
       if (participant) {
-        participant.setAudioNodes(null, audioElement, null);
-        participant.updateVolume(0); // Empezar muted, Minecraft actualizará
-
-        // Forzar actualización después de medio segundo
-        setTimeout(() => {
-          if (this.minecraft && this.minecraft.isInGame()) {
-            this.minecraft.processUpdate();
-          }
-        }, 500);
+        participant.setAudioNodes(gainNode, null, source);
+        console.log(`✅ Participant ${remoteGamertag} audio linked`);
       } else {
         this.participantsManager.addPendingNode(remoteGamertag, {
-          gainNode: null,
-          audioElement,
-          source: null,
+          gainNode,
+          audioElement: null,
+          source
         });
       }
     };
@@ -1040,7 +1015,7 @@ class WebRTCManager {
       }
     };
 
-    // MEJORADO: Manejo de estado ICE con restart automático
+    // MEJORADO: Manejo de estado ICE con restart automático real
     pc.oniceconnectionstatechange = () => {
       console.log(`❄️ ${remoteGamertag} - ICE: ${pc.iceConnectionState}`);
 
@@ -1059,8 +1034,8 @@ class WebRTCManager {
       }
 
       if (pc.iceConnectionState === "failed") {
-        console.log(`❌ ${remoteGamertag} - ICE failed, attempting restart`);
-        pc.restartIce();
+        console.log(`❌ ${remoteGamertag} - ICE failed, triggers renegotiation`);
+        this.renegotiate(remoteGamertag, true);
       }
     };
 
@@ -1076,6 +1051,30 @@ class WebRTCManager {
     console.log(`🔗 ${remoteGamertag} connecting...`);
 
     return pc;
+  }
+
+  async renegotiate(remoteGamertag, iceRestart = false) {
+    const pc = this.peerConnections.get(remoteGamertag);
+    if (!pc) return;
+
+    try {
+      if (iceRestart) pc.restartIce();
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({
+          type: "offer",
+          offer: offer,
+          from: this.currentGamertag,
+          to: remoteGamertag
+        }));
+        console.log(`📤 ${iceRestart ? 'ICE Restart' : 'Renegotiation'} offer sent to ${remoteGamertag}`);
+      }
+    } catch (e) {
+      console.error(`❌ Renegotiation failed for ${remoteGamertag}:`, e);
+    }
   }
 
   async attemptReconnect(remoteGamertag) {
